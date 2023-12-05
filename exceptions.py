@@ -1,11 +1,11 @@
-class OsVariableNotDefined(Exception):
+class EnvironmentVariableNotDefined(Exception):
     """Отсутствие обязательных переменных окружения."""
 
     pass
 
 
-class EndpointNotAvailable(Exception):
-    """Недоступность эндпоинта."""
+class EndpointBadResponse(Exception):
+    """Статус код ответа отличен от 200."""
 
     pass
 
