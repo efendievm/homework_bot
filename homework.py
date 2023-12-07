@@ -68,7 +68,7 @@ def get_api_answer(timestamp):
     except Exception as error:
         raise exceptions.EndpointRequestError(error)
     if response.status_code != HTTPStatus.OK:
-        raise exceptions.EndpointBadResponse(response.status_code)
+        raise exceptions.EndpointBadResponse(response.status_code, ENDPOINT)
 
     return response.json()
 
@@ -102,46 +102,12 @@ def _get_value(key, homework):
     return value
 
 
-def _parse_exception(error):
-    if isinstance(error, exceptions.EndpointBadResponse):
-        code = error.args[0]
-        if code == HTTPStatus.NOT_FOUND:
-            return (f"Сбой в работе программы: Эндпоинт {ENDPOINT} "
-                    "недоступен. Код ответа API: 404")
-        elif code == HTTPStatus.UNAUTHORIZED:
-            return ("Сбой в работе программы: При запросе к эндпоинту "
-                    f"{ENDPOINT} учетные данные не были предоставлены")
-        elif code == HTTPStatus.BAD_REQUEST:
-            return ("Сбой в работе программы: При запросе к эндпоинту "
-                    f"{ENDPOINT} дата предоставлена в неверном формате")
-        else:
-            return ("Сбой в работе программы: Запрос к эндпоинту "
-                    f"{ENDPOINT} вызывал ошибку {code}")
-    elif isinstance(error, exceptions.EndpointRequestError):
-        return ("Сбой в работе программы: Запрос к эндпоинту "
-                f"{ENDPOINT} вызывал ошибку {error}")
-    elif isinstance(error, exceptions.KeyNotFound):
-        (key, source) = error.args
-        return (f"Сбой в работе программы: в объекте {source} "
-                f"отсутсвует ключ {key}")
-    elif isinstance(error, exceptions.UnexpectedStatus):
-        status = error.args[0]
-        return (f"Неожиданный статус домашней работы: {status}")
-    elif isinstance(error, TypeError):
-        (value, expected_type) = error.args
-        return f"Объект {value} не соответствует типу {expected_type}"
-    else:
-        return f"Сбой в работе программы: {error}"
-
-
 def main():
     """Основная логика работы бота."""
     try:
         check_tokens()
     except exceptions.EnvironmentVariableNotDefined as error:
-        logger.critical((
-            f"Отсутствует обязательная переменная окружения: \"{error}\""
-            "Программа принудительно остановлена"))
+        logger.critical(error)
         return
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
@@ -150,27 +116,34 @@ def main():
     is_previous_request_ok = True
 
     while True:
+        error_message = ""
         try:
             response = get_api_answer(timestamp)
             homeworks = check_response(response)
+            is_previous_request_ok = True
+            timestamp = response.get("current_date", timestamp)
             if len(homeworks) == 0:
                 logger.debug("Новые статусы отсутствуют")
-            else:
-                new_status = parse_status(homeworks[0])
-                if new_status == status:
-                    logger.debug("Новые статусы отсутствуют")
-                else:
-                    status = new_status
-                    send_message(bot, status)
-            is_previous_request_ok = True
-            timestamp = response.get("current_date")
+                continue
+            new_status = parse_status(homeworks[0])
+            if new_status == status:
+                logger.debug("Новые статусы отсутствуют")
+                continue
+            status = new_status
+            send_message(bot, status)
+            logger.debug(status)
+        except TypeError as error:
+            (value, expected_type) = error.args
+            error_message = (f"Объект {value} не соответствует "
+                             f"типу {expected_type}")
         except Exception as error:
-            message = _parse_exception(error)
-            logger.error(message)
-            if is_previous_request_ok:
-                send_message(bot, message)
-            is_previous_request_ok = False
+            error_message = error
         finally:
+            if error_message != "":
+                logger.error(error_message)
+                if is_previous_request_ok:
+                    send_message(bot, error_message)
+                is_previous_request_ok = False
             time.sleep(RETRY_PERIOD)
 
 
