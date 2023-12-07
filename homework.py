@@ -69,7 +69,6 @@ def get_api_answer(timestamp):
         raise exceptions.EndpointRequestError(error)
     if response.status_code != HTTPStatus.OK:
         raise exceptions.EndpointBadResponse(response.status_code, ENDPOINT)
-
     return response.json()
 
 
@@ -83,7 +82,6 @@ def check_response(response):
         raise exceptions.KeyNotFound("homeworks", response)
     if not isinstance(homeworks, list):
         raise TypeError(homeworks, type(list))
-
     return homeworks
 
 
@@ -94,6 +92,13 @@ def parse_status(homework):
     if not (verdict := HOMEWORK_VERDICTS.get(status)):
         raise exceptions.UnexpectedStatus(status)
     return f"Изменился статус проверки работы \"{homework_name}\". {verdict}"
+
+
+def _parse_status(homeworks, status):
+    if len(homeworks) == 0:
+        return ""
+    new_status = parse_status(homeworks[0])
+    return new_status if new_status != status else ""
 
 
 def _get_value(key, homework):
@@ -109,12 +114,10 @@ def main():
     except exceptions.EnvironmentVariableNotDefined as error:
         logger.critical(error)
         return
-
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = 0
     status = ""
     is_previous_request_ok = True
-
     while True:
         error_message = ""
         try:
@@ -122,11 +125,8 @@ def main():
             homeworks = check_response(response)
             is_previous_request_ok = True
             timestamp = response.get("current_date", timestamp)
-            if len(homeworks) == 0:
-                logger.debug("Новые статусы отсутствуют")
-                continue
-            new_status = parse_status(homeworks[0])
-            if new_status == status:
+            new_status = _parse_status(homeworks, status)
+            if not new_status:
                 logger.debug("Новые статусы отсутствуют")
                 continue
             status = new_status
@@ -139,7 +139,7 @@ def main():
         except Exception as error:
             error_message = error
         finally:
-            if error_message != "":
+            if error_message:
                 logger.error(error_message)
                 if is_previous_request_ok:
                     send_message(bot, error_message)
